@@ -7,7 +7,9 @@ target_host=localhost
 target_port=6379
 target_db=0
 
-redis-cli -h $source_host -p $source_port -n $source_db KEYS \* | \
+comm -23 \
+	<(redis-cli -h $source_host -p $source_port -n $source_db KEYS \* | sort) \
+	<(redis-cli -h $target_host -p $target_port -n $target_db KEYS \* | sort) | \
 	while read key; \
 		do echo "Copying $key"; \
 		redis-cli --raw -h $source_host -p $source_port -n $source_db DUMP "$key" \
