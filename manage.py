@@ -3,13 +3,7 @@
 import os
 from flask.ext.script import Manager, Shell, Server
 
-from p13n.app import create_app
-from p13n.settings import DevConfig, ProdConfig
-
-if os.environ.get("P13N_ENV") == 'prod':
-    app = create_app(ProdConfig)
-else:
-    app = create_app(DevConfig)
+from p13n import app
 
 HERE = os.path.abspath(os.path.dirname(__file__))
 TEST_PATH = os.path.join(HERE, 'tests')
