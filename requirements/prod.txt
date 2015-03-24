@@ -1,0 +1,13 @@
+# Everything needed in production
+
+# Flask
+Flask==0.10.1
+Flask-Bcrypt==0.6.0
+Flask-Cache>=0.13.1
+itsdangerous==0.24
+
+# DB
+redis>=2.0.0
+
+# Deployment
+gunicorn>=19.1.1

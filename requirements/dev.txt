@@ -1,0 +1,11 @@
+# Everything the developer needs in addition to the production requirements
+-r prod.txt
+
+# Testing
+pytest>=2.6.3
+webtest
+
+# Management script
+Flask-Script
+
+flake8==2.4.0
