@@ -1,3 +1,9 @@
+.DELETE_ON_ERROR:
+.SECONDARY:
+.SECONDEXPANSION:
+
+SHELL := /bin/bash -e -o pipefail
+
 VIRTUALENV = source env/bin/activate &&
 MANAGE = $(VIRTUALENV) python manage.py
 
