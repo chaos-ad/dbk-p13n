@@ -172,7 +172,7 @@ def fetch_article_recs(id, min_records=5, max_records=16):
     recs = model.records(id, max(min_records, max_records))
     if len(recs) >= min_records:
         article_infos = model.infos(recs)
-        for rank, (article_id, score) in recs[0:max_records]:
+        for article_id, score in recs[0:max_records]:
             rank += 1
             result.append({"productMasterSKU": article_id, "rank": rank, "recWeight": score, "attr": article_infos[rank - 1]})
     return result
@@ -197,7 +197,7 @@ def fetch_article_brand(id):
 def fetch_user_brand(id, min_records=1, max_records=16):
     rank = 0
     result = []
-    recs = DbUser(app.db).brand(id, max(min_records, max_records))
+    recs = DbUser(app.db).brands(id, max(min_records, max_records))
     if len(recs) >= min_records:
         for brand, score in recs[0:max_records]:
             rank += 1
