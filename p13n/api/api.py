@@ -35,6 +35,21 @@ class API(object):
     def publish(self):
         raise NotImplemented()
 
+    def get_param(self, name, default=None):
+        """
+        Retrieves a named API parameter.
+        Order of scopes to search in:
+         * query string
+         * headers
+         * cookies
+        """
+        scopes = [request.args, request.headers, request.cookies]
+        for s in scopes:
+            value = s.get(name)
+            if value is not None:
+                return value
+        return default
+
 
 class ArticleAPI(API):
     """Article API"""
