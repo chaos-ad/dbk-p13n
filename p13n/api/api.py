@@ -22,12 +22,16 @@ class API(object):
     methods = ['GET']
     defaults = None
 
-    def options(self):
-        return {'methods': self.methods, 'defaults': self.defaults}
-
     def provide(self, url, handler=None):
-        full_url = self.prefix + url
-        app.add_url_rule(full_url, full_url, self.handle if handler is None else handler, **self.options())
+        def wrapper(h):
+            def wraps(**kwargs):
+                args = self.defaults.copy()
+                args.update(kwargs)
+                return h(**args)
+            return wraps
+        path = self.prefix + url
+        handler = self.handle if handler is None else handler
+        app.add_url_rule(path, path, wrapper(handler), methods=self.methods)
 
     def handle(self, **kwargs):
         abort(501)
@@ -120,7 +124,6 @@ class RecentAPI(API):
 
 class DbModel(object):
     """DB Model"""
-
     def __init__(self, db):
         self._db = db
         self._pipeline = None
@@ -138,11 +141,6 @@ class DbModel(object):
             finally:
                 self._pipeline = None
 
-    @classmethod
-    def extract_ids(iter):
-        ids, _ = zip(*iter)
-        return ids
-
 
 class DbArticle(DbModel):
     """DbArticle"""
@@ -159,7 +157,7 @@ class DbArticle(DbModel):
         return self.db().hgetall('%s/ATTR' % id)
 
     def infos(self, records):
-        return self.pipeline(lambda: [self.info(_id) for _id, _ in records])
+        return self.pipeline(lambda: [self.info(id) for id in records])
 
     def records(self, id, limit=-1):
         return self.db().zrevrangebyscore('%s/RECS' % id, float('+Inf'), float('-Inf'), 0, limit, withscores=True)
@@ -180,14 +178,19 @@ class DbUser(DbModel):
         return self.db().lrange('%s/RECENT' % id, 0, limit)
 
 
+def unzip(iter):
+    v, _ = zip(*iter)
+    return v
+
+
 def fetch_article_recs(id, min_records=5, max_records=16):
     rank = 0
     result = []
     model = DbArticle(app.db)
     recs = model.records(id, max(min_records, max_records))
     if len(recs) >= min_records:
-        article_infos = model.infos(recs)
-        for article_id, score in recs[0:max_records]:
+        article_infos = model.infos(unzip(recs))
+        for article_id, score in recs:
             rank += 1
             result.append({"productMasterSKU": article_id, "rank": rank, "recWeight": score, "attr": article_infos[rank - 1]})
     return result
@@ -198,8 +201,8 @@ def fetch_user_recs(id, min_records=5, max_records=16):
     result = []
     recs = DbUser(app.db).records(id, max(min_records, max_records))
     if len(recs) >= min_records:
-        article_infos = DbArticle(app.db).infos(recs)
-        for article_id, score in recs[0:max_records]:
+        article_infos = DbArticle(app.db).infos(unzip(recs))
+        for article_id, score in recs:
             rank += 1
             result.append({"productMasterSKU": article_id, "rank": rank, "recWeight": score, "attr": article_infos[rank - 1]})
     return result
@@ -214,7 +217,7 @@ def fetch_user_brand(id, min_records=1, max_records=16):
     result = []
     recs = DbUser(app.db).brands(id, max(min_records, max_records))
     if len(recs) >= min_records:
-        for brand, score in recs[0:max_records]:
+        for brand, score in recs:
             rank += 1
             result.append({"brand": brand, "rank": rank, "weight": score})
     return result
@@ -226,7 +229,7 @@ def fetch_user_recent(id, min_records=1, max_records=16):
     recs = DbUser(app.db).recent(id, max(min_records, max_records))
     if len(recs) >= min_records:
         article_infos = DbArticle(app.db).infos(recs)
-        for article_id in recs[0:max_records]:
+        for article_id in recs:
             rank += 1
             result.append({"productMasterSKU": article_id, "rank": rank, "attr": article_infos[rank - 1]})
     return result
