@@ -6,7 +6,8 @@ from flask import Flask
 from p13n.settings import DevConfig, ProdConfig
 from p13n.extensions import (
     bcrypt,
-    cache
+    cache,
+    MatrixConverter
 )
 
 import os
@@ -28,6 +29,7 @@ def create_app(config_object=ProdConfig):
 def register_extensions(app):
     bcrypt.init_app(app)
     cache.init_app(app)
+    app.url_map.converters['matrix'] = MatrixConverter
     return None
 
 

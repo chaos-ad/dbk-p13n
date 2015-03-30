@@ -4,6 +4,7 @@
 from p13n import app
 from flask import request, json, abort, url_for, make_response
 from werkzeug.http import parse_range_header
+from werkzeug.exceptions import BadRequest
 from werkzeug.datastructures import Range, ContentRange
 
 
@@ -70,7 +71,7 @@ class API(object):
          * headers
          * cookies
         """
-        scopes = [request.args, request.headers, request.cookies]
+        scopes = [request.view_args.get('mx', {}), request.headers, request.cookies]
         for s in scopes:
             value = s.get(name)
             if value is not None:
@@ -83,7 +84,7 @@ class API(object):
         """
         rv = self.get_param(name)
         if rv is None:
-            abort(400)
+            raise BadRequest()
         return rv
 
 
@@ -100,7 +101,7 @@ class RecommendationAPI(API):
         if h is None:
             return Range('resources', [default])
         if (v is None) or (v.units != 'resources') or (len(v.ranges) > 1):
-            abort(400)
+            raise BadRequest()
         return v
 
     def range_to_scope(self, ranges):
@@ -109,8 +110,8 @@ class RecommendationAPI(API):
             return begin, -1
         return begin, (end - begin)
 
-    def get_content_location(self, user_id):
-        return url_for(request.endpoint, user_id=user_id)
+    def get_content_location(self, user_id, type):
+        return url_for(request.endpoint, user_id=user_id, mx={'type': type})
 
     def get_content_range(self, ranges, length):
         begin, _ = ranges.ranges[0]
@@ -124,36 +125,38 @@ class RecommendationAPI(API):
             ranges = self.get_resource_range()
             if user_id == '-':
                 user_id = self.require_param('user_id')
+            type = self.require_param('type')
             scope = self.range_to_scope(ranges.ranges[0])
-            result = handler(user_id=user_id, scope=scope)
+            result = handler(user_id=user_id, type=type, scope=scope)
+            if result is None:
+                raise BadRequest()
             crange = self.get_content_range(ranges, len(result))
             for fn in decorators:
                 result = fn(result)
             response = make_response(result)
-            response.headers.add('Content-Location', self.get_content_location(user_id))
+            response.headers.add('Content-Location', self.get_content_location(user_id, type))
             response.headers.add('Accept-Range', ranges.units)
             response.headers.add('Content-Range', crange)
             return response
         return wrapper
 
-    def _get_brands(self, user_id, scope):
-        return DbUser(app.db).get_top_brands(user_id, scope)
+    def _get_brands(self, user_id, type, scope):
+        if type == 'top-brands':
+            return DbUser(app.db).get_top_brands(user_id, scope)
 
-    def _get_xsell(self, user_id, scope):
-        return DbUser(app.db).get_recommendations(user_id, scope)
-
-    def _get_recent(self, user_id, scope):
-        return DbUser(app.db).get_recently_viewed(user_id, scope)
+    def _get_recommendations(self, user_id, type, scope):
+        if type == 'x-sell':
+            return DbUser(app.db).get_recommendations(user_id, scope)
+        if type == 'recently-viewed':
+            return DbUser(app.db).get_recently_viewed(user_id, scope)
 
     def publish(self):
         default = [jsonify()]
         unwrapped = [unwrap('item')] + default
-        self.provide('/brands/;type=top-brands', self.handle(self._get_brands, decorators=default))
-        self.provide('/brands/;type=top-brands/item', self.handle(self._get_brands, decorators=unwrapped))
-        self.provide('/products/;type=x-sell', self.handle(self._get_xsell, decorators=default))
-        self.provide('/products/;type=x-sell/item', self.handle(self._get_xsell, decorators=unwrapped))
-        self.provide('/products/;type=recently-viewed', self.handle(self._get_recent, decorators=default))
-        self.provide('/products/;type=recently-viewed/item', self.handle(self._get_recent, decorators=unwrapped))
+        self.provide('/brands/<matrix():mx>', self.handle(self._get_brands, decorators=default))
+        self.provide('/brands/<matrix():mx>/item', self.handle(self._get_brands, decorators=unwrapped))
+        self.provide('/products/<matrix():mx>', self.handle(self._get_recommendations, decorators=default))
+        self.provide('/products/<matrix():mx>/item', self.handle(self._get_recommendations, decorators=unwrapped))
 
 
 #
@@ -312,6 +315,5 @@ class Brand(dict):
 #
 # API Publishing
 
-# for api in [ArticleAPI, UserAPI, BrandAPI, RecentAPI]:
 for api in [RecommendationAPI]:
     api().publish()
