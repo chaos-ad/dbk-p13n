@@ -7,7 +7,20 @@ from flask import request, json, abort
 from functools import wraps
 
 
+def unzip(iter):
+    """
+    Unzips a list of tuples.
+    Returns list formed out of first element of each tuple.
+    """
+    v, _ = zip(*iter)
+    return v
+
+
 def jsonify():
+    """
+    Response decorator.
+    Makes up a JSON response given call result of the underlying function, usually a dict.
+    """
     def decorated(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -16,8 +29,27 @@ def jsonify():
     return decorated
 
 
+def unwrap(on):
+    """
+    Response decorator.
+    Extracts a specific attribute from each dict in a list returned by the underlying function.
+    """
+    def decorated(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            return [v[on] for v in fn(*args, **kwargs)]
+        return wrapper
+    return decorated
+
+
+#
+# API Definitions
+
 class API(object):
-    """Basic API stub"""
+    """
+    Basic API stub.
+    Serves us to ease defining routing, defining default route fragments and wrapping API handlers.
+    """
     prefix = '/api'
     methods = ['GET']
     defaults = None
@@ -25,7 +57,7 @@ class API(object):
     def provide(self, url, handler=None):
         def wrapper(h):
             def wraps(**kwargs):
-                args = self.defaults.copy()
+                args = self.defaults.copy() if self.defaults is not None else {}
                 args.update(kwargs)
                 return h(**args)
             return wraps
@@ -56,71 +88,136 @@ class API(object):
 
 
 class ArticleAPI(API):
-    """Article API"""
+    """
+    Article API.
+    """
     prefix = '/api/RECS'
     defaults = {'min_results': 5, 'max_results': 16}
 
-    @jsonify()
-    def handle(self, arg_id, min_results, max_results):
+    def _handle(self, arg_id, min_results, max_results):
         arg_id = int(str(arg_id)[0:10])
-        return fetch_article_recs(arg_id, min_results, max_results)
+        limit = max(min_results, max_results)
+        return DbArticle(app.db).get_recommendations(arg_id, min_results, limit)
+
+    @jsonify()
+    def handle(self, **kwargs):
+        return self._handle(**kwargs)
+
+    @jsonify()
+    @unwrap(on='item')
+    def handle_unwrapped(self, **kwargs):
+        return self._handle(**kwargs)
 
     def publish(self):
         self.provide('/<int:arg_id>')
         self.provide('/<int:arg_id>/<int:min_results>')
         self.provide('/<int:arg_id>/<int:min_results>/<int:max_results>')
+        # How to handle these properly?
+        # Follow API docs closer?
+        self.provide('/unwrap/<int:arg_id>', self.handle_unwrapped)
+        self.provide('/unwrap/<int:arg_id>/<int:min_results>', self.handle_unwrapped)
+        self.provide('/unwrap/<int:arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
 
 
 class UserAPI(API):
-    """User API"""
+    """
+    User API.
+    """
     prefix = '/api/RECS'
     defaults = {'min_results': 5, 'max_results': 16}
 
+    def _handle(self, arg_id, min_results, max_results):
+        limit = max(min_results, max_results)
+        return DbUser(app.db).get_recommendations(arg_id, min_results, limit)
+
     @jsonify()
-    def handle(self, arg_id, min_results, max_results):
-        return fetch_user_recs(arg_id, min_results, max_results)
+    def handle(self, **kwargs):
+        return self._handle(**kwargs)
+
+    @jsonify()
+    @unwrap(on='item')
+    def handle_unwrapped(self, **kwargs):
+        return self._handle(**kwargs)
 
     def publish(self):
         self.provide('/<arg_id>')
         self.provide('/<arg_id>/<int:min_results>')
         self.provide('/<arg_id>/<int:min_results>/<int:max_results>')
+        self.provide('/unwrap/<arg_id>', self.handle_unwrapped)
+        self.provide('/unwrap/<arg_id>/<int:min_results>', self.handle_unwrapped)
+        self.provide('/unwrap/<arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
 
 
 class BrandAPI(API):
-    """Brand API"""
+    """
+    Brand API.
+    """
     prefix = '/api/BRAND'
     defaults = {'min_results': 1, 'max_results': 16}
+
+    def _handle(self, arg_id, min_results, max_results):
+        limit = max(min_results, max_results)
+        return DbUser(app.db).get_top_brands(arg_id, min_results, limit)
 
     @jsonify()
     def handle_article_brand(self, arg_id, **kwargs):
         arg_id = int(str(arg_id)[0:10])
-        return fetch_article_brand(arg_id)
+        return DbArticle(app.db).brand(arg_id)
 
     @jsonify()
-    def handle(self, arg_id, min_results, max_results):
-        return fetch_user_brand(arg_id, min_results, max_results)
+    def handle(self, **kwargs):
+        return self._handle(**kwargs)
+
+    @jsonify()
+    @unwrap(on='item')
+    def handle_unwrapped(self, **kwargs):
+        return self._handle(**kwargs)
 
     def publish(self):
-        self.provide('/<int:arg_id>', self.handle_article_brand)
+        # Not quite well-formed route:
+        #  - db contains just a string under any article brand key;
+        #  - could easily match earlier errorneously.
+        # What to do with it? Commented out for now.
+        # self.provide('/<int:arg_id>', self.handle_article_brand)
         self.provide('/<arg_id>')
         self.provide('/<arg_id>/<int:min_results>')
         self.provide('/<arg_id>/<int:min_results>/<int:max_results>')
+        self.provide('/unwrap/<arg_id>', self.handle_unwrapped)
+        self.provide('/unwrap/<arg_id>/<int:min_results>', self.handle_unwrapped)
+        self.provide('/unwrap/<arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
 
 
 class RecentAPI(API):
-    """Recent API"""
+    """
+    Recent API.
+    """
     prefix = '/api/RECENT'
     defaults = {'min_results': 1, 'max_results': 16}
 
+    def _handle(self, arg_id, min_results, max_results):
+        limit = max(min_results, max_results)
+        return DbUser(app.db).get_recently_viewed(arg_id, min_results, limit)
+
     @jsonify()
-    def handle(self, arg_id, min_results, max_results):
-        return fetch_user_recent(arg_id, min_results, max_results)
+    def handle(self, **kwargs):
+        return self._handle(**kwargs)
+
+    @jsonify()
+    @unwrap(on='item')
+    def handle_unwrapped(self, **kwargs):
+        return self._handle(**kwargs)
 
     def publish(self):
         self.provide('/<arg_id>')
         self.provide('/<arg_id>/<int:min_results>')
         self.provide('/<arg_id>/<int:min_results>/<int:max_results>')
+        self.provide('/unwrap/<arg_id>', self.handle_unwrapped)
+        self.provide('/unwrap/<arg_id>/<int:min_results>', self.handle_unwrapped)
+        self.provide('/unwrap/<arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
 
+
+#
+# Database accessors
 
 class DbModel(object):
     """DB Model"""
@@ -156,17 +253,38 @@ class DbArticle(DbModel):
     def attr(self, id):
         return self.db().hgetall('%s/ATTR' % id)
 
-    def infos(self, records):
-        return self.pipeline(lambda: [self.info(id) for id in records])
+    def infos(self, ids):
+        return dict(zip(ids, self.pipeline(lambda: [self.info(id) for id in ids])))
 
     def records(self, id, limit=-1):
         return self.db().zrevrangebyscore('%s/RECS' % id, float('+Inf'), float('-Inf'), 0, limit, withscores=True)
+
+    def get_product_variant(self, info):
+        return ProductVariant(
+            info['defaultVariation'],
+            info['shortDesc'],
+            brand=Brand(info['manufacturer']),
+            price=UnitPriceSpecification(info['salePrice'], type='SALE_PRICE'),
+            image_url=info['effectiveUrl']
+        )
+
+    def get_recommendations(self, id, at_least=-1, at_most=-1):
+        records = self.records(id, at_most)
+        if len(records) < at_least:
+            return []
+        infos = self.infos(unzip(records))
+        print (infos)
+        return [
+            Recommendation(n, score, "x-sell", self.get_product_variant(infos[sku]))
+                for n, (sku, score) in enumerate(records, start=1)
+        ]
 
 
 class DbUser(DbModel):
     """DbUser"""
     def __init__(self, db):
         super(DbUser, self).__init__(db)
+        self.articles = DbArticle(db)
 
     def records(self, id, limit=-1):
         return self.db().zrevrangebyscore('%s/RECS' % id, float('+Inf'), float('-Inf'), 0, limit, withscores=True)
@@ -177,68 +295,93 @@ class DbUser(DbModel):
     def recent(self, id, limit=-1):
         return self.db().lrange('%s/RECENT' % id, 0, limit)
 
+    def get_top_brands(self, id, at_least=-1, at_most=-1):
+        brands = self.brands(id, at_most)
+        if len(brands) < at_least:
+            return []
+        return [
+            Recommendation(n, score, "top-brands", Brand(brand))
+                for n, (brand, score) in enumerate(brands, start=1)
+        ]
 
-def unzip(iter):
-    v, _ = zip(*iter)
-    return v
+    def get_recommendations(self, id, at_least=-1, at_most=-1):
+        records = self.records(id, at_most)
+        if len(records) < at_least:
+            return []
+        infos = self.articles.infos(unzip(records))
+        return [
+            Recommendation(n, score, "x-sell", self.articles.get_product_variant(infos[sku]))
+                for n, (sku, score) in enumerate(records, start=1)
+        ]
 
-
-def fetch_article_recs(id, min_records=5, max_records=16):
-    rank = 0
-    result = []
-    model = DbArticle(app.db)
-    recs = model.records(id, max(min_records, max_records))
-    if len(recs) >= min_records:
-        article_infos = model.infos(unzip(recs))
-        for article_id, score in recs:
-            rank += 1
-            result.append({"productMasterSKU": article_id, "rank": rank, "recWeight": score, "attr": article_infos[rank - 1]})
-    return result
-
-
-def fetch_user_recs(id, min_records=5, max_records=16):
-    rank = 0
-    result = []
-    recs = DbUser(app.db).records(id, max(min_records, max_records))
-    if len(recs) >= min_records:
-        article_infos = DbArticle(app.db).infos(unzip(recs))
-        for article_id, score in recs:
-            rank += 1
-            result.append({"productMasterSKU": article_id, "rank": rank, "recWeight": score, "attr": article_infos[rank - 1]})
-    return result
-
-
-def fetch_article_brand(id):
-    return DbArticle(app.db).brand(id)
+    def get_recently_viewed(self, id, at_least=-1, at_most=-1):
+        records = self.recent(id, at_most)
+        if len(records) < at_least:
+            return []
+        infos = self.articles.infos(records)
+        return [
+            Recommendation(n, 0.0, "recently-viewed", self.articles.get_product_variant(infos[sku]))
+                for n, sku in enumerate(records, start=1)
+        ]
 
 
-def fetch_user_brand(id, min_records=1, max_records=16):
-    rank = 0
-    result = []
-    recs = DbUser(app.db).brands(id, max(min_records, max_records))
-    if len(recs) >= min_records:
-        for brand, score in recs:
-            rank += 1
-            result.append({"brand": brand, "rank": rank, "weight": score})
-    return result
+#
+# API Resource views
+
+class Recommendation(dict):
+    def __init__(self, rank, weight, type, item):
+        super(Recommendation, self).__init__()
+        self['@type'] = self.__class__.__name__
+        self['rank'] = rank
+        self['weight'] = weight
+        self['type'] = type
+        self['item'] = item
 
 
-def fetch_user_recent(id, min_records=1, max_records=16):
-    rank = 0
-    result = []
-    recs = DbUser(app.db).recent(id, max(min_records, max_records))
-    if len(recs) >= min_records:
-        article_infos = DbArticle(app.db).infos(recs)
-        for article_id in recs:
-            rank += 1
-            result.append({"productMasterSKU": article_id, "rank": rank, "attr": article_infos[rank - 1]})
-    return result
+class UnitPriceSpecification(dict):
+    def __init__(self, price, type='SALE_PRICE', currency='EUR'):
+        super(UnitPriceSpecification, self).__init__()
+        self['@type'] = self.__class__.__name__
+        self['price'] = price
+        self['type'] = type
+        self['priceCurrency'] = currency
 
 
-def publish():
-    """PUBLISH ALL THE APIS"""
-    for api in [ArticleAPI, UserAPI, BrandAPI, RecentAPI]:
-        api().publish()
+class ProductVariant(dict):
+    location = '/catalogue/products/'
+
+    def __init__(self, sku, description, brand, price, image_url):
+        super(ProductVariant, self).__init__()
+        self['@type'] = self.__class__.__name__
+        self['@id'] = self.location + sku
+        self['@version'] = '?'
+        self['url'] = 'http://example.com/'
+        self['sku'] = sku
+        self['master'] = {'@id': self.location + self.master()}
+        self['description'] = description
+        self['brand'] = brand
+        self['image'] = image_url
+        self['priceSpecifications'] = [price]
+        self['signage'] = []
+
+    def master(self):
+        return self['sku'][0:10]
 
 
-publish()
+class Brand(dict):
+    location = '/catalogue/brands/'
+
+    def __init__(self, name):
+        super(Brand, self).__init__()
+        self['@type'] = self.__class__.__name__
+        self['@id'] = self.location + '?'
+        self['name'] = name
+        self['description'] = name
+        self['url'] = 'http://example.com/'
+
+
+#
+# API Publishing
+
+for api in [ArticleAPI, UserAPI, BrandAPI, RecentAPI]:
+    api().publish()
