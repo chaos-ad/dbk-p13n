@@ -283,7 +283,7 @@ class ProductVariant(dict):
         super(ProductVariant, self).__init__()
         self['@type'] = self.__class__.__name__
         self['@id'] = self.location + sku
-        self['@version'] = '?'
+        self['@version'] = '<no-data>'
         self['url'] = 'http://example.com/'
         self['sku'] = sku
         self['master'] = {'@id': self.location + self.master()}
@@ -303,10 +303,10 @@ class Brand(dict):
     def __init__(self, name):
         super(Brand, self).__init__()
         self['@type'] = self.__class__.__name__
-        self['@id'] = self.location + '?'
+        self['@id'] = self.location + '<no-data>'
         self['name'] = name
         self['description'] = name
-        self['url'] = 'http://example.com/'
+        self['url'] = '<no-data>'
 
 
 #
