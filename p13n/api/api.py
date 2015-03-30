@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 from p13n import app
-from flask import request, json, abort
-
-from functools import wraps
+from flask import request, json, abort, url_for, make_response
+from werkzeug.http import parse_range_header
+from werkzeug.datastructures import ContentRange
 
 
 def unzip(iter):
@@ -21,12 +21,9 @@ def jsonify():
     Response decorator.
     Makes up a JSON response given call result of the underlying function, usually a dict.
     """
-    def decorated(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            return json.jsonify(result=fn(*args, **kwargs))
-        return wrapper
-    return decorated
+    def wrapper(result):
+        return json.jsonify(result=result)
+    return wrapper
 
 
 def unwrap(on):
@@ -34,12 +31,9 @@ def unwrap(on):
     Response decorator.
     Extracts a specific attribute from each dict in a list returned by the underlying function.
     """
-    def decorated(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            return [v[on] for v in fn(*args, **kwargs)]
-        return wrapper
-    return decorated
+    def wrapper(result):
+        return [v[on] for v in result]
+    return wrapper
 
 
 #
@@ -50,20 +44,17 @@ class API(object):
     Basic API stub.
     Serves us to ease defining routing, defining default route fragments and wrapping API handlers.
     """
-    prefix = '/api'
+    prefix = '/p13n/users/<user_id>'
     methods = ['GET']
-    defaults = None
+    decorators = [jsonify()]
+
+    def __init__(self, prefix):
+        self.prefix = self.prefix + prefix
 
     def provide(self, url, handler=None):
-        def wrapper(h):
-            def wraps(**kwargs):
-                args = self.defaults.copy() if self.defaults is not None else {}
-                args.update(kwargs)
-                return h(**args)
-            return wraps
         path = self.prefix + url
         handler = self.handle if handler is None else handler
-        app.add_url_rule(path, path, wrapper(handler), methods=self.methods)
+        app.add_url_rule(path, path, handler, methods=self.methods)
 
     def handle(self, **kwargs):
         abort(501)
@@ -86,134 +77,83 @@ class API(object):
                 return value
         return default
 
+    def require_param(self, name):
+        """
+        Requires presence of a named API parameter.
+        """
+        rv = self.get_param(name)
+        if rv is None:
+            abort(400)
+        return rv
 
-class ArticleAPI(API):
+
+class RecommendationAPI(API):
     """
-    Article API.
+    Recommendation API.
     """
-    prefix = '/api/RECS'
-    defaults = {'min_results': 5, 'max_results': 16}
+    def __init__(self):
+        super(RecommendationAPI, self).__init__('/recommendations')
 
-    def _handle(self, arg_id, min_results, max_results):
-        arg_id = int(str(arg_id)[0:10])
-        limit = max(min_results, max_results)
-        return DbArticle(app.db).get_recommendations(arg_id, min_results, limit)
+    def get_resource_range(self, default=(0, None)):
+        h = request.headers.get('range')
+        v = parse_range_header(h)
+        if h is None:
+            return default
+        if (v is None) or (v.units != 'resources') or (len(v.ranges) > 1):
+            abort(400)
+        return v
 
-    @jsonify()
-    def handle(self, **kwargs):
-        return self._handle(**kwargs)
+    def range_to_scope(self, ranges):
+        begin, end = ranges
+        if end is None:
+            return begin, -1
+        return begin, (end - begin)
 
-    @jsonify()
-    @unwrap(on='item')
-    def handle_unwrapped(self, **kwargs):
-        return self._handle(**kwargs)
+    def get_content_location(self, user_id):
+        return url_for(request.endpoint, user_id=user_id)
+
+    def get_content_range(self, ranges, length):
+        begin, _ = ranges.ranges[0]
+        if length == 0:
+            return ContentRange(ranges.units, None, None, 0)
+        else:
+            return ContentRange(ranges.units, begin, begin + length, begin + length)
+
+    def handle(self, handler, decorators=[]):
+        def wrapper(user_id, **kwargs):
+            ranges = self.get_resource_range()
+            if user_id == '-':
+                user_id = self.require_param('user_id')
+            scope = self.range_to_scope(ranges.ranges[0])
+            result = handler(user_id=user_id, scope=scope)
+            crange = self.get_content_range(ranges, len(result))
+            for fn in decorators:
+                result = fn(result)
+            response = make_response(result)
+            response.headers.add('Content-Location', self.get_content_location(user_id))
+            response.headers.add('Accept-Range', ranges.units)
+            response.headers.add('Content-Range', crange)
+            return response
+        return wrapper
+
+    def _get_brands(self, user_id, scope):
+        return DbUser(app.db).get_top_brands(user_id, scope)
+
+    def _get_xsell(self, user_id, scope):
+        return DbUser(app.db).get_recommendations(user_id, scope)
+
+    def _get_recent(self, user_id, scope):
+        return DbUser(app.db).get_recently_viewed(user_id, scope)
 
     def publish(self):
-        self.provide('/<int:arg_id>')
-        self.provide('/<int:arg_id>/<int:min_results>')
-        self.provide('/<int:arg_id>/<int:min_results>/<int:max_results>')
-        # How to handle these properly?
-        # Follow API docs closer?
-        self.provide('/unwrap/<int:arg_id>', self.handle_unwrapped)
-        self.provide('/unwrap/<int:arg_id>/<int:min_results>', self.handle_unwrapped)
-        self.provide('/unwrap/<int:arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
-
-
-class UserAPI(API):
-    """
-    User API.
-    """
-    prefix = '/api/RECS'
-    defaults = {'min_results': 5, 'max_results': 16}
-
-    def _handle(self, arg_id, min_results, max_results):
-        limit = max(min_results, max_results)
-        return DbUser(app.db).get_recommendations(arg_id, min_results, limit)
-
-    @jsonify()
-    def handle(self, **kwargs):
-        return self._handle(**kwargs)
-
-    @jsonify()
-    @unwrap(on='item')
-    def handle_unwrapped(self, **kwargs):
-        return self._handle(**kwargs)
-
-    def publish(self):
-        self.provide('/<arg_id>')
-        self.provide('/<arg_id>/<int:min_results>')
-        self.provide('/<arg_id>/<int:min_results>/<int:max_results>')
-        self.provide('/unwrap/<arg_id>', self.handle_unwrapped)
-        self.provide('/unwrap/<arg_id>/<int:min_results>', self.handle_unwrapped)
-        self.provide('/unwrap/<arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
-
-
-class BrandAPI(API):
-    """
-    Brand API.
-    """
-    prefix = '/api/BRAND'
-    defaults = {'min_results': 1, 'max_results': 16}
-
-    def _handle(self, arg_id, min_results, max_results):
-        limit = max(min_results, max_results)
-        return DbUser(app.db).get_top_brands(arg_id, min_results, limit)
-
-    @jsonify()
-    def handle_article_brand(self, arg_id, **kwargs):
-        arg_id = int(str(arg_id)[0:10])
-        return Brand(DbArticle(app.db).brand(arg_id))
-
-    @jsonify()
-    def handle(self, **kwargs):
-        return self._handle(**kwargs)
-
-    @jsonify()
-    @unwrap(on='item')
-    def handle_unwrapped(self, **kwargs):
-        return self._handle(**kwargs)
-
-    def publish(self):
-        # Not quite well-formed route:
-        #  - db contains just a string under any article brand key;
-        #  - could easily match earlier errorneously.
-        # What to do with it? Commented out for now.
-        # self.provide('/<int:arg_id>', self.handle_article_brand)
-        self.provide('/<arg_id>')
-        self.provide('/<arg_id>/<int:min_results>')
-        self.provide('/<arg_id>/<int:min_results>/<int:max_results>')
-        self.provide('/unwrap/<arg_id>', self.handle_unwrapped)
-        self.provide('/unwrap/<arg_id>/<int:min_results>', self.handle_unwrapped)
-        self.provide('/unwrap/<arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
-
-
-class RecentAPI(API):
-    """
-    Recent API.
-    """
-    prefix = '/api/RECENT'
-    defaults = {'min_results': 1, 'max_results': 16}
-
-    def _handle(self, arg_id, min_results, max_results):
-        limit = max(min_results, max_results)
-        return DbUser(app.db).get_recently_viewed(arg_id, min_results, limit)
-
-    @jsonify()
-    def handle(self, **kwargs):
-        return self._handle(**kwargs)
-
-    @jsonify()
-    @unwrap(on='item')
-    def handle_unwrapped(self, **kwargs):
-        return self._handle(**kwargs)
-
-    def publish(self):
-        self.provide('/<arg_id>')
-        self.provide('/<arg_id>/<int:min_results>')
-        self.provide('/<arg_id>/<int:min_results>/<int:max_results>')
-        self.provide('/unwrap/<arg_id>', self.handle_unwrapped)
-        self.provide('/unwrap/<arg_id>/<int:min_results>', self.handle_unwrapped)
-        self.provide('/unwrap/<arg_id>/<int:min_results>/<int:max_results>', self.handle_unwrapped)
+        default = [jsonify()]
+        unwrapped = [unwrap('item')] + default
+        self.provide('/brands/;type=top-brands', self.handle(self._get_brands, decorators=default))
+        self.provide('/brands/;type=top-brands/item', self.handle(self._get_brands, decorators=unwrapped))
+        self.provide('/products/;type=x-sell', self.handle(self._get_xsell, decorators=default))
+        self.provide('/products/;type=x-sell/item', self.handle(self._get_xsell, decorators=unwrapped))
+        self.provide('/products/;type=recently-viewed', self.handle(self._get_recent, decorators=default))
+        self.provide('/products/;type=recently-viewed/item', self.handle(self._get_recent, decorators=unwrapped))
 
 
 #
@@ -268,17 +208,6 @@ class DbArticle(DbModel):
             image_url=info['effectiveUrl']
         )
 
-    def get_recommendations(self, id, at_least=-1, at_most=-1):
-        records = self.records(id, at_most)
-        if len(records) < at_least:
-            return []
-        infos = self.infos(unzip(records))
-        print (infos)
-        return [
-            Recommendation(n, score, "x-sell", self.get_product_variant(infos[sku]))
-                for n, (sku, score) in enumerate(records, start=1)
-        ]
-
 
 class DbUser(DbModel):
     """DbUser"""
@@ -286,42 +215,42 @@ class DbUser(DbModel):
         super(DbUser, self).__init__(db)
         self.articles = DbArticle(db)
 
-    def records(self, id, limit=-1):
-        return self.db().zrevrangebyscore('%s/RECS' % id, float('+Inf'), float('-Inf'), 0, limit, withscores=True)
+    def records(self, id, scope=(0, -1)):
+        begin, limit = scope
+        return self.db().zrevrangebyscore('%s/RECS' % id, float('+Inf'), float('-Inf'), begin, limit, withscores=True)
 
-    def brands(self, id, limit=-1):
-        return self.db().zrevrangebyscore('%s/BRAND' % id, float('+Inf'), float('-Inf'), 0, limit, withscores=True)
+    def brands(self, id, scope=(0, -1)):
+        begin, limit = scope
+        return self.db().zrevrangebyscore('%s/BRAND' % id, float('+Inf'), float('-Inf'), begin, limit, withscores=True)
 
-    def recent(self, id, limit=-1):
-        return self.db().lrange('%s/RECENT' % id, 0, limit)
+    def recent(self, id, scope=(0, -1)):
+        begin, limit = scope
+        return self.db().lrange('%s/RECENT' % id, begin, limit)
 
-    def get_top_brands(self, id, at_least=-1, at_most=-1):
-        brands = self.brands(id, at_most)
-        if len(brands) < at_least:
-            return []
+    def get_top_brands(self, id, scope):
+        brands = self.brands(id, scope)
+        begin, _ = scope
         return [
             Recommendation(n, score, "top-brands", Brand(brand))
-                for n, (brand, score) in enumerate(brands, start=1)
+                for n, (brand, score) in enumerate(brands, start=begin + 1)
         ]
 
-    def get_recommendations(self, id, at_least=-1, at_most=-1):
-        records = self.records(id, at_most)
-        if len(records) < at_least:
-            return []
+    def get_recommendations(self, id, scope):
+        records = self.records(id, scope)
         infos = self.articles.infos(unzip(records))
+        begin, _ = scope
         return [
             Recommendation(n, score, "x-sell", self.articles.get_product_variant(infos[sku]))
-                for n, (sku, score) in enumerate(records, start=1)
+                for n, (sku, score) in enumerate(records, start=begin + 1)
         ]
 
-    def get_recently_viewed(self, id, at_least=-1, at_most=-1):
-        records = self.recent(id, at_most)
-        if len(records) < at_least:
-            return []
+    def get_recently_viewed(self, id, scope):
+        records = self.recent(id, scope)
         infos = self.articles.infos(records)
+        begin, _ = scope
         return [
             Recommendation(n, 0.0, "recently-viewed", self.articles.get_product_variant(infos[sku]))
-                for n, sku in enumerate(records, start=1)
+                for n, sku in enumerate(records, start=begin + 1)
         ]
 
 
@@ -383,5 +312,6 @@ class Brand(dict):
 #
 # API Publishing
 
-for api in [ArticleAPI, UserAPI, BrandAPI, RecentAPI]:
+# for api in [ArticleAPI, UserAPI, BrandAPI, RecentAPI]:
+for api in [RecommendationAPI]:
     api().publish()
