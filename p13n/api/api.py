@@ -4,7 +4,7 @@
 from p13n import app
 from flask import request, json, abort, url_for, make_response
 from werkzeug.http import parse_range_header
-from werkzeug.datastructures import ContentRange
+from werkzeug.datastructures import Range, ContentRange
 
 
 def unzip(iter):
@@ -98,7 +98,7 @@ class RecommendationAPI(API):
         h = request.headers.get('range')
         v = parse_range_header(h)
         if h is None:
-            return default
+            return Range('resources', [default])
         if (v is None) or (v.units != 'resources') or (len(v.ranges) > 1):
             abort(400)
         return v
