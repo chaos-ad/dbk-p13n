@@ -162,7 +162,7 @@ class BrandAPI(API):
     @jsonify()
     def handle_article_brand(self, arg_id, **kwargs):
         arg_id = int(str(arg_id)[0:10])
-        return DbArticle(app.db).brand(arg_id)
+        return Brand(DbArticle(app.db).brand(arg_id))
 
     @jsonify()
     def handle(self, **kwargs):
@@ -248,7 +248,7 @@ class DbArticle(DbModel):
         return self.db().hgetall('%s/INFO' % id)
 
     def brand(self, id):
-        return self.db().hgetall('%s/BRAND' % id)
+        return self.db().get('%s/BRAND' % id)
 
     def attr(self, id):
         return self.db().hgetall('%s/ATTR' % id)
