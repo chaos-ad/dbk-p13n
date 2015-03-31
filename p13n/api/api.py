@@ -71,7 +71,7 @@ class API(object):
          * headers
          * cookies
         """
-        scopes = [request.view_args.get('mx', {}), request.headers, request.cookies]
+        scopes = [request.view_args.get('mx', {}), request.args, request.headers, request.cookies]
         for s in scopes:
             value = s.get(name)
             if value is not None:
