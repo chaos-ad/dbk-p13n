@@ -45,3 +45,8 @@ docs/_build
 # Virtualenvs
 env
 env*
+
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml
