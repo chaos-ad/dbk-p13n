@@ -23,7 +23,7 @@ def test():
     exit_code = pytest.main([TEST_PATH, '--verbose'])
     return exit_code
 
-manager.add_command('server', Server())
+manager.add_command('server', Server(host=app.config.get('LISTEN_HOST'), port=app.config.get('LISTEN_PORT')))
 manager.add_command('shell', Shell(make_context=_make_context))
 
 if __name__ == '__main__':

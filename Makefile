@@ -25,3 +25,11 @@ server shell test:
 
 lint:
 	$(VIRTUALENV) flake8 --exclude=env .
+
+docker-build:
+	mv Dockerfile.local Dockerfile
+	sudo docker build -t p13n-beanstalk-image .
+	mv Dockerfile Dockerfile.local
+
+docker-run:
+	sudo docker run -it --rm -p 80:8080 p13n-beanstalk-image

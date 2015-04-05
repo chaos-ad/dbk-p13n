@@ -38,8 +38,8 @@ def register_errorhandlers(app):
 
 
 def connect_db(app):
-    db_host = app.config.get('REDIS_HOST', 'localhost')
-    db_port = app.config.get('REDIS_PORT', '6379')
+    db_host = app.config.get('REDIS_HOST')
+    db_port = app.config.get('REDIS_PORT')
     app.logger.info("Connecting to the database '%s:%s'..." % (db_host, db_port))
     app.db = redis.StrictRedis(host=db_host, port=db_port, decode_responses=True)
     app.logger.info("Connecting to the database '%s:%s': done." % (db_host, db_port))
