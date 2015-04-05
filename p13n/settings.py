@@ -15,18 +15,16 @@ class ProdConfig(Config):
     """Production configuration."""
     ENV = 'prod'
     DEBUG = False
-    REDIS_HOST = 'customer-recs.qxlul7.ng.0001.euw1.cache.amazonaws.com'
-    REDIS_PORT = '6379'
+    REDIS_HOST = os.environ.get('P13N_REDIS_HOST', '172.30.0.34')
+    REDIS_PORT = os.environ.get('P13N_REDIS_PORT', '6379')
 
 
 class DevConfig(Config):
     """Development configuration."""
     ENV = 'dev'
     DEBUG = True
-    REDIS_HOST = 'localhost'
-    REDIS_PORT = '6379'
-    # Put the db file in project root
-    # DB_PATH = os.path.join(Config.PROJECT_ROOT, DB_NAME)
+    REDIS_HOST = os.environ.get('P13N_REDIS_HOST', 'localhost')
+    REDIS_PORT = os.environ.get('P13N_REDIS_PORT', '6379')
     CACHE_TYPE = 'simple'  # Can be "memcached", "redis", etc.
 
 
