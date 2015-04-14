@@ -17,6 +17,15 @@ def unzip(iter):
     return v
 
 
+def ranker(start):
+    """
+    Simple contiguous integer range generator.
+    """
+    while True:
+        yield start
+        start += 1
+
+
 def jsonify():
     """
     Response decorator.
@@ -260,31 +269,46 @@ class DbUser(DbModel):
         begin, limit = scope
         return self.db().lrange('%s/RECENT' % id, begin, limit)
 
+    def gather(self, scope, records, fn):
+        rv = []
+        rnk = ranker(scope[0] + 1)
+        for r in records:
+            try:
+                r = r if type(r) is tuple else (r,)
+                rv.append(fn(rnk, *r))
+            except KeyError as ex:
+                app.logger.warning("Error handling record %s: missing key %s" % (str(r), ex))
+                pass
+        return rv
+
     def get_top_brands(self, id, scope):
         brands = self.assert_non_empty(self.brands(id, scope))
-        begin, _ = scope
-        return [
-            Recommendation(n, score, "top-brands", Brand(brand))
-                for n, (brand, score) in enumerate(brands, start=begin + 1)
-        ]
+        return self.gather(
+            scope,
+            brands,
+            lambda ranker, brand, score:
+                Recommendation(ranker, score, "top-brands", Brand(brand))
+        )
 
     def get_recommendations(self, id, scope):
         records = self.assert_non_empty(self.records(id, scope))
         infos = self.articles.infos(unzip(records))
-        begin, _ = scope
-        return [
-            Recommendation(n, score, "x-sell", self.articles.get_product_variant(infos[sku]))
-                for n, (sku, score) in enumerate(records, start=begin + 1)
-        ]
+        return self.gather(
+            scope,
+            records,
+            lambda ranker, sku, score:
+                Recommendation(ranker, score, "x-sell", self.articles.get_product_variant(infos[sku]))
+        )
 
     def get_recently_viewed(self, id, scope):
         records = self.assert_non_empty(self.recent(id, scope))
         infos = self.articles.infos(records)
-        begin, _ = scope
-        return [
-            Recommendation(n, 0.0, "recently-viewed", self.articles.get_product_variant(infos[sku]))
-                for n, sku in enumerate(records, start=begin + 1)
-        ]
+        return self.gather(
+            scope,
+            records,
+            lambda ranker, sku:
+                Recommendation(ranker, 0.0, "recently-viewed", self.articles.get_product_variant(infos[sku]))
+        )
 
 
 #
@@ -294,7 +318,7 @@ class Recommendation(dict):
     def __init__(self, rank, weight, type, item):
         super(Recommendation, self).__init__()
         self['@type'] = self.__class__.__name__
-        self['rank'] = rank
+        self['rank'] = next(rank)
         self['weight'] = weight
         self['type'] = type
         self['item'] = item
