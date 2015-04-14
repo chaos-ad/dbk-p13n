@@ -4,7 +4,7 @@
 from p13n import app
 from flask import request, json, abort, url_for, make_response
 from werkzeug.http import parse_range_header
-from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import BadRequest, NotFound
 from werkzeug.datastructures import Range, ContentRange
 
 
@@ -35,6 +35,24 @@ def unwrap(on):
     def wrapper(result):
         return [v[on] for v in result]
     return wrapper
+
+
+class EmptySet(Exception):
+    def __init__(self):
+        Exception.__init__(self)
+
+    def __str__(self):
+        return "The result is an empty set due to invalid request parameter"
+
+
+class Unprocessable(Exception):
+    def __init__(self, what, value):
+        Exception.__init__(self)
+        self.what = what
+        self.value = value
+
+    def __str__(self):
+        return "Unprocessable request with %s = %s" % (self.what, self.value)
 
 
 #
@@ -127,8 +145,13 @@ class RecommendationAPI(API):
                 user_id = self.require_param('user_id')
             type = self.require_param('type')
             scope = self.range_to_scope(ranges.ranges[0])
-            result = handler(user_id=user_id, type=type, scope=scope)
-            if result is None:
+            try:
+                result = handler(user_id=user_id, type=type, scope=scope)
+            except EmptySet as ex:
+                app.logger.error(ex)
+                raise NotFound()
+            except Unprocessable as ex:
+                app.logger.error(ex)
                 raise BadRequest()
             crange = self.get_content_range(ranges, len(result))
             for fn in decorators:
@@ -143,12 +166,14 @@ class RecommendationAPI(API):
     def _get_brands(self, user_id, type, scope):
         if type == 'top-brands':
             return DbUser(app.db).get_top_brands(user_id, scope)
+        raise Unprocessable('type', type)
 
     def _get_recommendations(self, user_id, type, scope):
         if type == 'x-sell':
             return DbUser(app.db).get_recommendations(user_id, scope)
         if type == 'recently-viewed':
             return DbUser(app.db).get_recently_viewed(user_id, scope)
+        raise Unprocessable('type', type)
 
     def publish(self):
         default = [jsonify()]
@@ -180,6 +205,11 @@ class DbModel(object):
                 return self._pipeline.execute()
             finally:
                 self._pipeline = None
+
+    def assert_non_empty(self, l):
+        if len(l) > 0:
+            return l
+        raise EmptySet()
 
 
 class DbArticle(DbModel):
@@ -231,7 +261,7 @@ class DbUser(DbModel):
         return self.db().lrange('%s/RECENT' % id, begin, limit)
 
     def get_top_brands(self, id, scope):
-        brands = self.brands(id, scope)
+        brands = self.assert_non_empty(self.brands(id, scope))
         begin, _ = scope
         return [
             Recommendation(n, score, "top-brands", Brand(brand))
@@ -239,7 +269,7 @@ class DbUser(DbModel):
         ]
 
     def get_recommendations(self, id, scope):
-        records = self.records(id, scope)
+        records = self.assert_non_empty(self.records(id, scope))
         infos = self.articles.infos(unzip(records))
         begin, _ = scope
         return [
@@ -248,7 +278,7 @@ class DbUser(DbModel):
         ]
 
     def get_recently_viewed(self, id, scope):
-        records = self.recent(id, scope)
+        records = self.assert_non_empty(self.recent(id, scope))
         infos = self.articles.infos(records)
         begin, _ = scope
         return [
