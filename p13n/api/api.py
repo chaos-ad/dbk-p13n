@@ -157,7 +157,7 @@ class RecommendationAPI(API):
             try:
                 result = handler(user_id=user_id, type=type, scope=scope)
             except EmptySet as ex:
-                app.logger.error(ex)
+                app.logger.debug(ex)
                 raise NotFound()
             except Unprocessable as ex:
                 app.logger.error(ex)
